@@ -131,6 +131,34 @@ def choose_flip_option():
         except Exception as e:
             print(f"❌ Error: {e}")
 
+def choose_hand_option():
+    """Let user choose which hand to track"""
+    print("\n✋ Pilih tangan untuk kontrol:")
+    print("  1. Tangan Kanan")
+    print("  2. Tangan Kiri")
+    print("  3. Auto (tangan yang terdeteksi)")
+    
+    while True:
+        try:
+            choice = input("\nPilih tangan (1-3, default: 3): ").strip()
+            
+            if choice == "1":
+                print("✅ Menggunakan tangan kanan")
+                return "right"
+            elif choice == "2":
+                print("✅ Menggunakan tangan kiri")
+                return "left"
+            elif choice == "3" or choice == "":
+                print("✅ Menggunakan auto detection")
+                return "auto"
+            else:
+                print("❌ Pilihan tidak valid! Masukkan 1, 2, atau 3.")
+        except KeyboardInterrupt:
+            print("\n❌ Dibatalkan oleh pengguna.")
+            exit()
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
 def init_camera(camera_index):
     """Initialize camera with given index"""
     # Try with DirectShow first
@@ -153,12 +181,16 @@ def init_camera(camera_index):
     
     return None
 
-# Inisialisasi MediaPipe dan pynput
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
-    max_num_hands=1,
-    min_detection_confidence=0.7,
-    min_tracking_confidence=0.7
+# Inisialisasi MediaPipe Pose dan pynput
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(
+    static_image_mode=False,
+    model_complexity=1,
+    smooth_landmarks=True,
+    enable_segmentation=False,
+    smooth_segmentation=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
 )
 mp_drawing = mp.solutions.drawing_utils
 mouse = Controller()
@@ -169,7 +201,7 @@ print(f"Ukuran layar: {screen_w} x {screen_h}")
 
 # Inisialisasi kamera
 print("="*60)
-print("         KONTROL MOUSE DENGAN GESTURE TANGAN")
+print("      KONTROL MOUSE DENGAN BODY POSE - HAND TRACKING")
 print("="*60)
 
 # Pilih kamera yang akan digunakan
@@ -177,6 +209,9 @@ selected_camera = choose_camera()
 
 # Pilih opsi flip kamera
 use_flip = choose_flip_option()
+
+# Pilih tangan yang akan ditrack
+hand_preference = choose_hand_option()
 
 # Load titik kalibrasi
 if not os.path.exists("calibration_points.npy"):
@@ -205,6 +240,7 @@ print("Titik kalibrasi:", cal_points)
 print("Metode kalibrasi:", calibration_method)
 print("Flip kalibrasi:", "Mirror" if calibration_flip else "Normal" if calibration_flip is not None else "Unknown")
 print("Opsi flip kamera:", "Mirror" if use_flip else "Normal")
+print("Tracking tangan:", hand_preference)
 
 # Dengan sistem baru, koordinat kalibrasi sudah disesuaikan dengan flip setting
 # Jadi kita langsung gunakan koordinat kalibrasi tanpa koreksi
@@ -228,7 +264,7 @@ if cap is None:
 
 print("\n📋 Instruksi:")
 print("- Gerakkan tangan di area yang sudah dikalibrasi")
-print("- Kepalkan tangan untuk klik kiri")
+print("- Hanya kontrol kursor (tanpa klik)")
 print("- Tekan ESC untuk keluar")
 print("="*60)
 
@@ -237,9 +273,6 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 prev_time = 0
-
-# Variabel untuk melacak status klik
-is_clicking = False
 
 # Variabel untuk smoothing pergerakan mouse
 smoothing_factor = 3  # Kurangi untuk respon lebih cepat
@@ -258,6 +291,19 @@ def draw_calibration_area(frame, cal_points):
         cv2.circle(frame, tuple(point), 8, (0, 255, 255), -1)
         cv2.putText(frame, corner_names[i], (point[0]+10, point[1]-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+def get_hand_position(landmarks, hand_side):
+    """Extract hand position from pose landmarks"""
+    if hand_side == "right":
+        # Right hand landmarks: wrist(16), thumb(22), index(20), middle(18), ring(16), pinky(20)
+        wrist = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST]
+        index_tip = landmarks[mp_pose.PoseLandmark.RIGHT_INDEX]
+        return wrist, index_tip
+    else:  # left hand
+        # Left hand landmarks: wrist(15), thumb(21), index(19), middle(17), ring(15), pinky(19)
+        wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST]
+        index_tip = landmarks[mp_pose.PoseLandmark.LEFT_INDEX]
+        return wrist, index_tip
 
 while cap.isOpened():
     success, frame = cap.read()
@@ -279,21 +325,63 @@ while cap.isOpened():
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     img_rgb.flags.writeable = False
 
-    results = hands.process(img_rgb)
+    results = pose.process(img_rgb)
     img_rgb.flags.writeable = True
     frame = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            # Ambil titik MCP middle finger (landmark 9) untuk posisi mouse
-            lm9 = hand_landmarks.landmark[9]  # Pangkal jari tengah
-            lm12 = hand_landmarks.landmark[12]  # Ujung jari tengah
+    if results.pose_landmarks:
+        # Draw pose landmarks
+        mp_drawing.draw_landmarks(
+            frame, 
+            results.pose_landmarks, 
+            mp_pose.POSE_CONNECTIONS,
+            landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+            connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 255), thickness=2)
+        )
+        
+        landmarks = results.pose_landmarks.landmark
+        
+        # Determine which hand to use for cursor control
+        cursor_x, cursor_y = None, None
+        hand_used = ""
+        
+        if hand_preference == "right":
+            try:
+                wrist, index_tip = get_hand_position(landmarks, "right")
+                cursor_x, cursor_y = int(index_tip.x * w), int(index_tip.y * h)
+                hand_used = "Right"
+            except:
+                pass
+        elif hand_preference == "left":
+            try:
+                wrist, index_tip = get_hand_position(landmarks, "left")
+                cursor_x, cursor_y = int(index_tip.x * w), int(index_tip.y * h)
+                hand_used = "Left"
+            except:
+                pass
+        else:  # auto detection
+            # Try right hand first, then left
+            try:
+                wrist, index_tip = get_hand_position(landmarks, "right")
+                if wrist.visibility > 0.5 and index_tip.visibility > 0.5:
+                    cursor_x, cursor_y = int(index_tip.x * w), int(index_tip.y * h)
+                    hand_used = "Right (Auto)"
+            except:
+                pass
             
-            # Konversi ke koordinat kamera
-            cx, cy = int(lm9.x * w), int(lm9.y * h)
-
+            # If right hand not detected well, try left
+            if cursor_x is None:
+                try:
+                    wrist, index_tip = get_hand_position(landmarks, "left")
+                    if wrist.visibility > 0.5 and index_tip.visibility > 0.5:
+                        cursor_x, cursor_y = int(index_tip.x * w), int(index_tip.y * h)
+                        hand_used = "Left (Auto)"
+                except:
+                    pass
+        
+        if cursor_x is not None and cursor_y is not None:
             # Transform titik tangan ke koordinat layar menggunakan kalibrasi
-            hand_point = np.array([[cx, cy]], dtype=np.float32).reshape(-1, 1, 2)
+            hand_point = np.array([[cursor_x, cursor_y]], dtype=np.float32).reshape(-1, 1, 2)
             transformed_point = cv2.perspectiveTransform(hand_point, M)[0][0]
             mapped_x, mapped_y = int(transformed_point[0]), int(transformed_point[1])
             
@@ -301,33 +389,10 @@ while cap.isOpened():
             mapped_x = max(0, min(screen_w - 1, mapped_x))
             mapped_y = max(0, min(screen_h - 1, mapped_y))
 
-            # Hitung jarak antara pangkal dan ujung jari tengah untuk deteksi kepalan
-            distance = math.sqrt((lm12.x - lm9.x)**2 + (lm12.y - lm9.y)**2)
-            
-            # Threshold untuk mendeteksi kepalan tangan
-            threshold = 0.08  # Sesuaikan nilai ini berdasarkan pengujian
-            
-            # Deteksi apakah tangan mengepal atau terbuka
-            hand_closed = distance < threshold
-            
-            # Tampilkan status tangan
-            status_text = "Mengepal" if hand_closed else "Terbuka"
-            status_color = (0, 0, 255) if hand_closed else (0, 255, 0)
-            cv2.putText(frame, status_text, (cx+10, cy-30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
-            
-            # Kontrol klik mouse
-            if hand_closed and not is_clicking:
-                mouse.press(Button.left)
-                is_clicking = True
-            elif not hand_closed and is_clicking:
-                mouse.release(Button.left)
-                is_clicking = False
-            
             # Tampilkan titik di layar kamera
-            circle_color = (0, 0, 255) if hand_closed else (0, 255, 0)
-            cv2.circle(frame, (cx, cy), 12, circle_color, -1)
-            cv2.putText(frame, f'Cam: {cx},{cy}', (cx+10, cy-10),
+            circle_color = (0, 255, 0)  # Always green since no click
+            cv2.circle(frame, (cursor_x, cursor_y), 12, circle_color, -1)
+            cv2.putText(frame, f'Cam: {cursor_x},{cursor_y}', (cursor_x+10, cursor_y-10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             # Tambahkan posisi yang sudah di-transform ke daftar untuk smoothing
@@ -350,14 +415,13 @@ while cap.isOpened():
                 # Tampilkan info mapping
                 cv2.putText(frame, f'Screen: {smoothed_x},{smoothed_y}', (10, 120),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                
+                # Tampilkan tangan yang digunakan
+                cv2.putText(frame, f'Hand: {hand_used}', (10, 150),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
     else:
-        # Jika tangan tidak terdeteksi dan masih dalam status klik, lepaskan klik
-        if is_clicking:
-            mouse.release(Button.left)
-            is_clicking = False
-        
-        # Reset daftar posisi saat tangan tidak terdeteksi
+        # Reset daftar posisi saat pose tidak terdeteksi
         prev_positions_x = []
         prev_positions_y = []
 
@@ -369,11 +433,6 @@ while cap.isOpened():
     # Tampilkan informasi di layar
     cv2.putText(frame, f'FPS: {int(fps)}', (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
-    # Tampilkan status klik
-    if is_clicking:
-        cv2.putText(frame, "KLIK AKTIF", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
     
     # Tampilkan ukuran layar
     cv2.putText(frame, f'Screen: {screen_w}x{screen_h}', (10, 90),
@@ -388,18 +447,18 @@ while cap.isOpened():
     cv2.putText(frame, f'Flip: {flip_status}', (w-150, 90),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
+    # Tampilkan preferensi tangan
+    cv2.putText(frame, f'Hand Pref: {hand_preference}', (w-180, 120),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
     # Instruksi
     cv2.putText(frame, "ESC: Keluar", (w-120, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    cv2.imshow("Hand Gesture Mouse Control (Calibrated)", frame)
+    cv2.imshow("Body Pose Hand Mouse Control (Calibrated)", frame)
 
     if cv2.waitKey(1) & 0xFF == 27:  # ESC
         break
-
-# Pastikan melepaskan klik jika program ditutup saat sedang klik
-if is_clicking:
-    mouse.release(Button.left)
 
 cap.release()
 cv2.destroyAllWindows()
