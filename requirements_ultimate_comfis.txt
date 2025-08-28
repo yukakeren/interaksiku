@@ -1,0 +1,31 @@
+# Ultimate Comfis Mouse - Requirements
+# Complete dependency list for the Ultimate Comfis Mouse application
+
+# Computer Vision and Image Processing
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# GUI Framework (Tkinter is built-in with Python)
+# tkinter comes with Python standard library
+
+# Mouse and Keyboard Control
+pynput>=1.7.6
+pyautogui>=0.9.54
+
+# Threading and Time (Built-in Python modules)
+# threading - built-in
+# time - built-in
+# math - built-in
+# os - built-in
+
+# Development and Debugging
+# traceback - built-in
+
+# Optional: For better performance and additional features
+# scipy>=1.11.0  # For advanced mathematical operations if needed
+# matplotlib>=3.7.0  # For debugging and visualization if needed
+
+# Python Version Requirement
+# Requires Python 3.8 or higher

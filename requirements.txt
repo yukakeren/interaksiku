@@ -1,6 +1,7 @@
-opencv-python
-mediapipe
-numpy
-pynput
-pyautogui
-pillow
+# Ultimate Comfis Mouse - Core Dependencies
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+pynput>=1.7.6
+pyautogui>=0.9.54
+Pillow>=10.0.0

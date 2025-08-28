@@ -305,7 +305,7 @@ while cap.isOpened():
             distance = math.sqrt((lm12.x - lm9.x)**2 + (lm12.y - lm9.y)**2)
             
             # Threshold untuk mendeteksi kepalan tangan
-            threshold = 0.08  # Sesuaikan nilai ini berdasarkan pengujian
+            threshold = 0.0  # Sesuaikan nilai ini berdasarkan pengujian
             
             # Deteksi apakah tangan mengepal atau terbuka
             hand_closed = distance < threshold
