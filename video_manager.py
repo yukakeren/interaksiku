@@ -73,7 +73,7 @@ class VideoDisplayManager:
             placeholder_text: Optional placeholder text
         """
         try:
-            if not target_frame.winfo_exists():
+            if not target_frame or not target_frame.winfo_exists():
                 return
             
             # Clear all video labels

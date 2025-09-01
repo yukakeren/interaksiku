@@ -315,8 +315,15 @@ class UltimateComfisMouseApp:
         camera_index = self.get_selected_camera_index()
         
         # Initialize mouse controller
-        if not self.mouse_controller.initialize():
-            messagebox.showerror("Error", "Failed to initialize mouse controller!")
+        try:
+            if not self.mouse_controller.initialize():
+                messagebox.showerror("Mouse Control Error", 
+                    "Failed to initialize mouse controller. Hand tracking may not be available.")
+                return
+        except Exception as e:
+            messagebox.showerror("Mouse Control Error", 
+                f"Failed to initialize mouse controller: {str(e)}\n\n"
+                "This might be due to missing dependencies in the standalone version.")
             return
         
         # Update UI
@@ -364,14 +371,20 @@ class UltimateComfisMouseApp:
             hand_detected, screen_pos = self.mouse_controller.process_frame(frame, smoothing_factor)
             
             # Display frame
-            if hasattr(self.ui_manager, 'mouse_video_frame'):
+            if hasattr(self.ui_manager, 'mouse_video_frame') and self.ui_manager.mouse_video_frame:
                 self.video_display.display_frame(
                     frame,
                     self.ui_manager.mouse_video_frame,
                     self.camera_thread.is_running
                 )
             
+            # Small delay to control frame rate
             time.sleep(0.033)  # ~30 FPS
+        
+        # Update status when loop ends
+        self.root.after(0, lambda: self.ui_manager.mouse_status_label.config(
+            text="Mouse control stopped."
+        ))
         
         # Cleanup
         self.mouse_controller.cleanup()
@@ -401,15 +414,19 @@ class UltimateComfisMouseApp:
     def _update_ui_after_stop(self) -> None:
         """Update UI after stopping camera"""
         try:
-            if hasattr(self.ui_manager, 'start_cal_btn') and self.ui_manager.start_cal_btn.winfo_exists():
+            if (hasattr(self.ui_manager, 'start_cal_btn') and 
+                self.ui_manager.start_cal_btn and 
+                self.ui_manager.start_cal_btn.winfo_exists()):
                 self.ui_manager.start_cal_btn.config(state="normal")
-        except tk.TclError:
+        except (tk.TclError, AttributeError):
             pass
         
         try:
-            if hasattr(self.ui_manager, 'start_mouse_btn') and self.ui_manager.start_mouse_btn.winfo_exists():
+            if (hasattr(self.ui_manager, 'start_mouse_btn') and 
+                self.ui_manager.start_mouse_btn and 
+                self.ui_manager.start_mouse_btn.winfo_exists()):
                 self.ui_manager.start_mouse_btn.config(state="normal")
-        except tk.TclError:
+        except (tk.TclError, AttributeError):
             pass
     
     def update_manual_calibration_points(self, points: List[List[int]]) -> None:

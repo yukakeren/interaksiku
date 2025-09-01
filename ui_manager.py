@@ -42,6 +42,22 @@ class UIManager:
         self.root.geometry("1000x700")
         self.root.configure(bg=COLORS['background'])
         
+        # Set window icon (handle both development and executable)
+        try:
+            import sys
+            import os
+            
+            if getattr(sys, 'frozen', False):  # Running as exe
+                # Get the directory where the exe is located
+                icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+            else:  # Running as script
+                icon_path = "icon.ico"
+            
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Could not load icon: {e}")
+        
         self._create_header()
         self._create_main_layout()
         self._create_status_bar()
